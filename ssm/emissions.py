@@ -161,8 +161,12 @@ class _LinearEmissions(_Emissions):
              + self.ds
 
     @ensure_args_are_lists
-    def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
+    def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20, smooth=0):
         Keff = 1 if self.single_subspace else self.K
+
+        if smooth > 0:
+            # TODO: smooth the data, if requested, with a Gaussian filter
+            pass
 
         # First solve a linear regression for data given input
         if self.M > 0:
@@ -260,338 +264,32 @@ class _CompoundLinearEmissions(_Emissions):
         datas = []
         for em, xp in zip(self.emissions_models, np.split(x, D_offsets, axis=1)):
             datas.append(em.forward(xp, input, tag))
-        return np.column_stack(datas)
+        return np.concatenate(datas, axis=2)
 
     @ensure_args_are_lists
     def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
-        assert data.shape[1] == self.N
+        for data in datas:
+            assert data.shape[1] == self.N
+
         N_offsets = np.cumsum(self.N_vec)[:-1]
         pcas = []
 
         split_datas = list(zip(*[np.split(data, N_offsets, axis=1) for data in datas]))
         split_masks = list(zip(*[np.split(mask, N_offsets, axis=1) for mask in masks]))
-        assert len(split_masks) == len(split_datas) == len(datas)
+        assert len(split_masks) == len(split_datas) == self.P
 
         for em, dps, mps in zip(self.emissions_models, split_datas, split_masks):
             pcas.append(em._initialize_with_pca(dps, inputs, mps, tags))
 
-        # Combine the PCA objects (kinda hacky...)
+        # Combine the PCA objects
         from sklearn.decomposition import PCA
         pca = PCA(self.D)
         pca.components_ = block_diag(*[p.components_ for p in pcas])
         pca.mean_ = np.concatenate([p.mean_ for p in pcas])
-        pca.noise_variance_ = np.concatenate([p.noise_variance_ for p in pcas])
+        # Not super pleased with this, but it should work...
+        pca.noise_variance_ = np.concatenate([p.noise_variance_ * np.ones(n) 
+                                              for p,n in zip(pcas, self.N_vec)])
         return pca
-
-
-# # Many emissions models start with a linear layer
-# class _ConstrainedEmissions(_Emissions):
-#     def __init__(self, N, K, D, M=0, single_subspace=True, N_vec=0, D_vec=0, **kwargs):
-#         super(_ConstrainedEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace, **kwargs)
-
-#         self.N_vec=N_vec
-#         print(self.N_vec)
-#         self.D_vec=D_vec
-#         print(self.D_vec)
-
-#         self.emissions_models = [_LinearEmissions(n, K, d) for n, d in zip(N_vec, D_vec)]
-#         # self.emissions_models = [_LinearEmissions(N_vec, K, D_vec)]
-#         self.np=len(N_vec)
-
-
-#         # print("params",self.emissions_models[0].params)
-
-
-#         self.Cs = [self.emissions_models[i].Cs for i in range(2)]
-
-#         self.Fs = npr.randn(1, N, M) if single_subspace else npr.randn(K, N, M)
-
-#         # print(self.Cs)
-#         # self._Ms = self.emissions_models[0]._Ms
-#         # self._As = self.emissions_models[0]._As
-#         # self.Fs = self.emissions_models[0].Fs
-#         # self.ds = self.emissions_models[0].ds
-#         # self.Cs = self.emissions_models[0].Cs
-#         # print(self.emissions_models[1].Cs)
-
-#         # print((emissions.params for emissions in self.emissions_models))
-
-#         # Initialize linear layer
-#         # Use the rational Cayley transform to parameterize an orthogonal emission matrix
-#         # assert N > D
-#         # self._Ms = npr.randn(1, D, D) if single_subspace else npr.randn(K, D, D)
-#         # self._As = npr.randn(1, N-D, D) if single_subspace else npr.randn(K, N-D, D)
-#         # self.Fs = npr.randn(1, N, M) if single_subspace else npr.randn(K, N, M)
-#         # self.ds = npr.randn(1, N) if single_subspace else npr.randn(K, N)
-#         #
-#         # # Set the emission matrix to be a random orthogonal matrix
-#         # C0 = npr.randn(1, N, D) if single_subspace else npr.randn(K, N, D)
-#         # for k in range(C0.shape[0]):
-#         #     C0[k] = np.linalg.svd(C0[k], full_matrices=False)[0]
-#         # self.Cs = C0
-
-#     @property
-#     def Cs(self):
-#         # See https://pubs.acs.org/doi/pdf/10.1021/acs.jpca.5b02015
-#         # for a derivation of the rational Cayley transform.
-#         Cs=[]
-#         for i in range(self.np):
-#             D = self.D
-#             T = lambda X: np.swapaxes(X, -1, -2)
-
-#             Bs = 0.5 * (self.emissions_models[i]._Ms - T(self.emissions_models[i]._Ms))    # Bs is skew symmetric
-#             Fs = np.matmul(T(self.emissions_models[i]._As), self.emissions_models[i]._As) - Bs
-#             trm1 = np.concatenate((np.eye(D) - Fs, 2 * self.emissions_models[i]._As), axis=1)
-#             trm2 = np.eye(D) + Fs
-#             Cs_temp = T(np.linalg.solve(T(trm2), T(trm1)))
-#             assert np.allclose(
-#                 np.matmul(T(Cs_temp), Cs_temp),
-#                 np.tile(np.eye(D)[None, :, :], (Cs_temp.shape[0], 1, 1))
-#                 )
-#             Cs.append(Cs_temp)
-#         return Cs
-
-#     @Cs.setter
-#     def Cs(self, values):
-#         for i in range(2):
-#             value=values[i]
-#             N, D = self.N, self.D
-#             T = lambda X: np.swapaxes(X, -1, -2)
-
-#             # Make sure value is the right shape and orthogonal
-#             Keff = 1 if self.single_subspace else self.K
-#             assert value.shape == (Keff, N, D)
-#             assert np.allclose(
-#                 np.matmul(T(value), value),
-#                 np.tile(np.eye(D)[None, :, :], (Keff, 1, 1))
-#                 )
-
-#             Q1s, Q2s = value[:, :D, :], value[:, D:, :]
-#             Fs = T(np.linalg.solve(T(np.eye(D) + Q1s), T(np.eye(D) - Q1s)))
-#             # Bs = 0.5 * (T(Fs) - Fs) = 0.5 * (self._Ms - T(self._Ms)) -> _Ms = T(Fs)
-#             self.emissions_models[i]._Ms = T(Fs)
-#             self.emissions_models[i]._As = 0.5 * np.matmul(Q2s, np.eye(D) + Fs)
-#             assert np.allclose(self.Cs[i], value)
-
-#     @property
-#     def params(self):
-
-#         # return self._As, self._Ms, self.Fs, self.ds
-
-#         temp_tuple=(self.Fs,self.emissions_models[0]._As,self.emissions_models[0]._Ms,self.emissions_models[0].ds)
-#         for i in range(self.np-1):
-#             temp_tuple= temp_tuple + (self.emissions_models[i+1]._As,self.emissions_models[i+1]._Ms,self.emissions_models[i+1].ds)
-
-#         return temp_tuple
-
-#     @params.setter
-#     def params(self, value):
-#         # self._As, self._Ms, self.Fs, self.ds = value
-
-#         self.Fs = value[0]
-#         for i in range(self.np):
-#             self.emissions_models[i]._As=value[1+3*i]
-#             self.emissions_models[i]._Ms=value[2+3*i]
-#             self.emissions_models[i].ds=value[3+3*i]
-
-#     def permute(self, perm):
-#         if not self.single_subspace:
-#             print("need to redo function")
-#             # self._As = self._As[perm]
-#             # self._Ms = self._Bs[perm]
-#             # self.Fs = self.Fs[perm]
-#             # self.ds = self.ds[perm]
-
-#     def _invert(self, data, input, mask, tag):
-#         """
-#         Approximate invert the linear emission model with the pseudoinverse
-
-#         y = Cx + d + noise; C orthogonal.
-#         xhat = (C^T C)^{-1} C^T (y-d)
-#         """
-#         assert self.single_subspace, "Can only invert with a single emission model"
-
-#         T = data.shape[0]
-#         C, F, d = self.Cs[0][0], self.Fs[0], self.emissions_models[0].ds[0] #Used to be self.Cs[0] - NEED TO UPDATE FOR SPECIFIC POPULATIONS
-#         C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
-
-#         # Account for the bias
-#         bias = input.dot(F.T) + d
-
-#         if not np.all(mask):
-#             data = interpolate_data(data, mask)
-#             # We would like to find the PCA coordinates in the face of missing data
-#             # To do so, alternate between running PCA and imputing the missing entries
-#             for itr in range(25):
-#                 q_mu = (data - bias).dot(C_pseudoinv)
-#                 data[:, ~mask[0]] = (q_mu.dot(C.T) + bias)[:, ~mask[0]]
-
-#         # Project data to get the mean
-#         return (data - bias).dot(C_pseudoinv)
-
-#     def forward(self, x, input, tag):
-#         return np.matmul(self.Cs[0][None, ...], x[:, None, :, None])[:, :, :, 0] \
-#              + np.matmul(self.Fs[None, ...], input[:, None, :, None])[:, :, :, 0] \
-#              + self.emissions_models[0].ds #ADDED [0] AFTER CS (NEED TO UPDATE)
-
-#     @ensure_args_are_lists
-#     def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
-#         Keff = 1 if self.single_subspace else self.K
-
-#         # First solve a linear regression for data given input
-#         if self.M > 0:
-#             from sklearn.linear_model import LinearRegression
-#             lr = LinearRegression(fit_intercept=False)
-#             lr.fit(np.vstack(inputs), np.vstack(datas))
-#             self.Fs = np.tile(lr.coef_[None, :, :], (Keff, 1, 1))
-
-#         for i in range(self.np):
-#         # Compute residual after accounting for input
-#             resids = [data - np.dot(input, self.Fs[0].T) for data, input in zip(datas, inputs)]
-
-#             # Run PCA to get a linear embedding of the data
-#             pca, xs = pca_with_imputation(self.D, resids, masks, num_iters=num_iters)
-
-#             self.Cs[i] = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))
-#             self.emissions_models[i].ds = np.tile(pca.mean_[None, :], (Keff, 1))
-
-#             return pca
-
-
-# # Many emissions models start with a linear layer
-# class _ConstrainedEmissions(_Emissions):
-#     def __init__(self, N, K, D, M=0, single_subspace=True, N_vec=0, **kwargs):
-#         super(_ConstrainedEmissions, self).__init__(N, K, D, M=M, single_subspace=single_subspace, **kwargs)
-#
-#         self.N_vec=N_vec
-#
-#         print(self.N_vec)
-#
-#         # Initialize linear layer
-#         # Use the rational Cayley transform to parameterize an orthogonal emission matrix
-#         assert N > D
-#         self._Ms = npr.randn(1, D, D) if single_subspace else npr.randn(K, D, D)
-#         self._As = npr.randn(1, N-D, D) if single_subspace else npr.randn(K, N-D, D)
-#         self.Fs = npr.randn(1, N, M) if single_subspace else npr.randn(K, N, M)
-#         self.ds = npr.randn(1, N) if single_subspace else npr.randn(K, N)
-#
-#         # Set the emission matrix to be a random orthogonal matrix
-#         C0 = npr.randn(1, N, D) if single_subspace else npr.randn(K, N, D)
-#         for k in range(C0.shape[0]):
-#             C0[k] = np.linalg.svd(C0[k], full_matrices=False)[0]
-#         self.Cs = C0
-#
-#     @property
-#     def Cs(self):
-#         # See https://pubs.acs.org/doi/pdf/10.1021/acs.jpca.5b02015
-#         # for a derivation of the rational Cayley transform.
-#         D = self.D
-#         T = lambda X: np.swapaxes(X, -1, -2)
-#
-#         Bs = 0.5 * (self._Ms - T(self._Ms))    # Bs is skew symmetric
-#         Fs = np.matmul(T(self._As), self._As) - Bs
-#         trm1 = np.concatenate((np.eye(D) - Fs, 2 * self._As), axis=1)
-#         trm2 = np.eye(D) + Fs
-#         Cs = T(np.linalg.solve(T(trm2), T(trm1)))
-#         assert np.allclose(
-#             np.matmul(T(Cs), Cs),
-#             np.tile(np.eye(D)[None, :, :], (Cs.shape[0], 1, 1))
-#             )
-#         return Cs
-#
-#     @Cs.setter
-#     def Cs(self, value):
-#         N, D = self.N, self.D
-#         T = lambda X: np.swapaxes(X, -1, -2)
-#
-#         # Make sure value is the right shape and orthogonal
-#         Keff = 1 if self.single_subspace else self.K
-#         assert value.shape == (Keff, N, D)
-#         assert np.allclose(
-#             np.matmul(T(value), value),
-#             np.tile(np.eye(D)[None, :, :], (Keff, 1, 1))
-#             )
-#
-#         Q1s, Q2s = value[:, :D, :], value[:, D:, :]
-#         Fs = T(np.linalg.solve(T(np.eye(D) + Q1s), T(np.eye(D) - Q1s)))
-#         # Bs = 0.5 * (T(Fs) - Fs) = 0.5 * (self._Ms - T(self._Ms)) -> _Ms = T(Fs)
-#         self._Ms = T(Fs)
-#         self._As = 0.5 * np.matmul(Q2s, np.eye(D) + Fs)
-#         assert np.allclose(self.Cs, value)
-#
-#     @property
-#     def params(self):
-#         return self._As, self._Ms, self.Fs, self.ds
-#
-#     @params.setter
-#     def params(self, value):
-#         self._As, self._Ms, self.Fs, self.ds = value
-#
-#     def permute(self, perm):
-#         if not self.single_subspace:
-#             self._As = self._As[perm]
-#             self._Ms = self._Bs[perm]
-#             self.Fs = self.Fs[perm]
-#             self.ds = self.ds[perm]
-#
-#     def _invert(self, data, input=None, mask=None, tag=None):
-#         """
-#         Approximate invert the linear emission model with the pseudoinverse
-#
-#         y = Cx + d + noise; C orthogonal.
-#         xhat = (C^T C)^{-1} C^T (y-d)
-#         """
-#         assert self.single_subspace, "Can only invert with a single emission model"
-#
-#         T = data.shape[0]
-#         C, F, d = self.Cs[0], self.Fs[0], self.ds[0]
-#         C_pseudoinv = np.linalg.solve(C.T.dot(C), C.T).T
-#
-#         # Account for the bias
-#         bias = input.dot(F.T) + d
-#
-#         if not np.all(mask):
-#             data = interpolate_data(data, mask)
-#             # We would like to find the PCA coordinates in the face of missing data
-#             # To do so, alternate between running PCA and imputing the missing entries
-#             for itr in range(25):
-#                 q_mu = (data - bias).dot(C_pseudoinv)
-#                 data[:, ~mask[0]] = (q_mu.dot(C.T) + bias)[:, ~mask[0]]
-#
-#         # Project data to get the mean
-#         return (data - bias).dot(C_pseudoinv)
-#
-#     def forward(self, x, input, tag):
-#         return np.matmul(self.Cs[None, ...], x[:, None, :, None])[:, :, :, 0] \
-#              + np.matmul(self.Fs[None, ...], input[:, None, :, None])[:, :, :, 0] \
-#              + self.ds
-#
-#     @ensure_args_are_lists
-#     def _initialize_with_pca(self, datas, inputs=None, masks=None, tags=None, num_iters=20):
-#         Keff = 1 if self.single_subspace else self.K
-#
-#         # First solve a linear regression for data given input
-#         if self.M > 0:
-#             from sklearn.linear_model import LinearRegression
-#             lr = LinearRegression(fit_intercept=False)
-#             lr.fit(np.vstack(inputs), np.vstack(datas))
-#             self.Fs = np.tile(lr.coef_[None, :, :], (Keff, 1, 1))
-#
-#         # Compute residual after accounting for input
-#         resids = [data - np.dot(input, self.Fs[0].T) for data, input in zip(datas, inputs)]
-#
-#         # Run PCA to get a linear embedding of the data
-#         pca, xs = pca_with_imputation(self.D, resids, masks, num_iters=num_iters)
-#
-#         self.Cs = np.tile(pca.components_.T[None, :, :], (Keff, 1, 1))
-#         self.ds = np.tile(pca.mean_[None, :], (Keff, 1))
-#
-#         return pca
-#
-
-
-
-
 
 
 # Sometimes we just want a bit of additive noise on the observations
