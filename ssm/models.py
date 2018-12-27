@@ -33,6 +33,7 @@ from ssm.hierarchical import \
 from ssm.emissions import \
     GaussianEmissions, \
     GaussianCompoundEmissions, \
+    GaussianNonOrthCompoundEmissions, \
     GaussianIdentityEmissions, \
     GaussianNeuralNetworkEmissions, \
     GaussianCompoundNeuralNetworkEmissions, \
@@ -213,6 +214,7 @@ def SLDS(N, K, D, M=0,
     emission_classes = dict(
         gaussian=GaussianEmissions,
         gaussian_compound=GaussianCompoundEmissions,
+        gaussian_non_orth_compound=GaussianNonOrthCompoundEmissions,
         gaussian_nn_compound=GaussianCompoundNeuralNetworkEmissions,
         gaussian_id=GaussianIdentityEmissions,
         gaussian_nn=GaussianNeuralNetworkEmissions,
@@ -298,6 +300,7 @@ def LDS(N, D, M=0,
     emission_classes = dict(
         gaussian=GaussianEmissions,
         gaussian_compound=GaussianCompoundEmissions,
+        gaussian_non_orth_compound=GaussianNonOrthCompoundEmissions,
         gaussian_nn_compound=GaussianCompoundNeuralNetworkEmissions,
         gaussian_id=GaussianIdentityEmissions,
         gaussian_nn=GaussianNeuralNetworkEmissions,
