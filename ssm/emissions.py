@@ -1,7 +1,7 @@
 import autograd.numpy as np
 import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
-from autograd.scipy.linalg import block_diag 
+from autograd.scipy.linalg import block_diag
 
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, logistic, logit, softplus, inv_softplus
@@ -193,10 +193,10 @@ class _CompoundLinearEmissions(_Emissions):
         """
         N_vec, D_vec are the sizes of the constituent emission models.
         Assume N_vec and D_vec are lists/tuples/arrays of length G and
-    
+
         N_vec = [N_1, ..., N_P] indicates that the first group of neurons
-        is size N_1, the P-th populations is size N_P.  Likewise for D_vec.  
-        We will assume that the data is grouped in the same way. 
+        is size N_1, the P-th populations is size N_P.  Likewise for D_vec.
+        We will assume that the data is grouped in the same way.
 
         We require sum(N_vec) == N and sum(D_vec) == D.
         """
@@ -213,7 +213,7 @@ class _CompoundLinearEmissions(_Emissions):
         self.N_vec, self.D_vec = N_vec, D_vec
 
         # Save the number of subpopulations
-        self.P = len(self.N_vec) 
+        self.P = len(self.N_vec)
 
         # The main purpose of this class is to wrap a bunch of emissions instances
         self.emissions_models = [_LinearEmissions(n, K, d) for n, d in zip(N_vec, D_vec)]
@@ -225,11 +225,11 @@ class _CompoundLinearEmissions(_Emissions):
         else:
             return np.array([block_diag(*[em.Cs[k] for em in self.emissions_models])
                              for k in range(self.K)])
-    
+
     @property
     def ds(self):
         return np.concatenate([em.ds for em in self.emissions_models], axis=1)
-    
+
     @property
     def Fs(self):
         return np.concatenate([em.Fs for em in self.emissions_models], axis=1)
@@ -252,7 +252,7 @@ class _CompoundLinearEmissions(_Emissions):
         assert data.shape[1] == self.N
         N_offsets = np.cumsum(self.N_vec)[:-1]
         states = []
-        for em, dp, mp in zip(self.emissions_models, 
+        for em, dp, mp in zip(self.emissions_models,
                             np.split(data, N_offsets, axis=1),
                             np.split(mask, N_offsets, axis=1)):
             states.append(em._invert(dp, input, mp, tag))
@@ -287,7 +287,7 @@ class _CompoundLinearEmissions(_Emissions):
         pca.components_ = block_diag(*[p.components_ for p in pcas])
         pca.mean_ = np.concatenate([p.mean_ for p in pcas])
         # Not super pleased with this, but it should work...
-        pca.noise_variance_ = np.concatenate([p.noise_variance_ * np.ones(n) 
+        pca.noise_variance_ = np.concatenate([p.noise_variance_ * np.ones(n)
                                               for p,n in zip(pcas, self.N_vec)])
         return pca
 
@@ -334,9 +334,64 @@ class _NeuralNetworkEmissions(_Emissions):
     def forward(self, x, input, tag):
         inputs = np.column_stack((x, input))
         for W, b in zip(self.weights, self.biases):
+            # print(W.shape)
             outputs = np.dot(inputs, W) + b
             inputs = np.tanh(outputs)
         return outputs[:, None, :]
+
+    def _invert(self, data, input, mask, tag):
+        """
+        Inverse is... who knows!
+        """
+        return npr.randn(data.shape[0], self.D)
+
+# Allow general nonlinear emission models with neural networks
+class _CompoundNeuralNetworkEmissions(_Emissions):
+    def __init__(self, N, K, D, M=0, hidden_layer_sizes=(50,), single_subspace=True, N_vec=None, D_vec=None, **kwargs):
+        assert single_subspace, "_NeuralNetworkEmissions only supports `single_subspace=True`"
+        super(_CompoundNeuralNetworkEmissions, self).__init__(N, K, D, M=M, single_subspace=True)
+
+
+        # print(hidden_layer_sizes)
+        #Make sure N_vec and D_vec are in correct form
+        assert isinstance(N_vec, (np.ndarray, list, tuple))
+        N_vec = np.array(N_vec, dtype=int)
+        assert np.sum(N_vec) == N
+
+        assert isinstance(D_vec, (np.ndarray, list, tuple)) and len(D_vec) == len(N_vec)
+        D_vec = np.array(D_vec, dtype=int)
+        assert np.sum(D_vec) == D
+
+        self.N_vec, self.D_vec = N_vec, D_vec
+
+        # Save the number of subpopulations
+        self.P = len(self.N_vec)
+
+        # The main purpose of this class is to wrap a bunch of emissions instances
+        self.emissions_models = [_NeuralNetworkEmissions(n, K, d, hidden_layer_sizes=hidden_layer_sizes) for n, d in zip(N_vec, D_vec)]
+
+
+    @property
+    def params(self):
+        return [em.params for em in self.emissions_models]
+
+    @params.setter
+    def params(self, value):
+        assert len(value) == self.P
+        for em, v in zip(self.emissions_models, value):
+            em.params = v
+
+    def permute(self, perm):
+        pass
+
+    def forward(self, x, input, tag):
+        assert x.shape[1] == self.D
+        D_offsets = np.cumsum(self.D_vec)[:-1]
+        datas = []
+        for em, xp in zip(self.emissions_models, np.split(x, D_offsets, axis=1)):
+            datas.append(em.forward(xp, input, tag))
+        return np.concatenate(datas, axis=2)
+
 
     def _invert(self, data, input, mask, tag):
         """
@@ -353,7 +408,7 @@ class _GaussianEmissionsMixin(object):
 
     @property
     def params(self):
-        return super(_GaussianEmissionsMixin, self).params + (self.inv_etas,)
+        return tuple(super(_GaussianEmissionsMixin, self).params) + (self.inv_etas,)
 
     @params.setter
     def params(self, value):
@@ -395,6 +450,14 @@ class GaussianEmissions(_GaussianEmissionsMixin, _LinearEmissions):
         pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
         self.inv_etas[:,...] = np.log(pca.noise_variance_)
 
+class GaussianCompoundEmissions(_GaussianEmissionsMixin, _CompoundLinearEmissions):
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
+        pca = self._initialize_with_pca(datas, inputs=inputs, masks=masks, tags=tags)
+        self.inv_etas[:,...] = np.log(pca.noise_variance_)
+
 
 class GaussianIdentityEmissions(_GaussianEmissionsMixin, _IdentityEmissions):
     pass
@@ -403,6 +466,8 @@ class GaussianIdentityEmissions(_GaussianEmissionsMixin, _IdentityEmissions):
 class GaussianNeuralNetworkEmissions(_GaussianEmissionsMixin, _NeuralNetworkEmissions):
     pass
 
+class GaussianCompoundNeuralNetworkEmissions(_GaussianEmissionsMixin, _CompoundNeuralNetworkEmissions):
+    pass
 
 class _StudentsTEmissionsMixin(object):
     def __init__(self, N, K, D, M=0, single_subspace=True, **kwargs):
@@ -567,7 +632,7 @@ class PoissonEmissions(_PoissonEmissionsMixin, _LinearEmissions):
         yhats = [self.link(np.clip(d, .1, np.inf)) for d in datas]
         self._initialize_with_pca(yhats, inputs=inputs, masks=masks, tags=tags)
 
-class PoissonConstrainedEmissions(_PoissonEmissionsMixin, _CompoundLinearEmissions):
+class PoissonCompoundEmissions(_PoissonEmissionsMixin, _CompoundLinearEmissions):
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         datas = [interpolate_data(data, mask) for data, mask in zip(datas, masks)]
@@ -581,6 +646,8 @@ class PoissonIdentityEmissions(_PoissonEmissionsMixin, _IdentityEmissions):
 class PoissonNeuralNetworkEmissions(_PoissonEmissionsMixin, _NeuralNetworkEmissions):
     pass
 
+class PoissonCompoundNeuralNetworkEmissions(_PoissonEmissionsMixin, _CompoundNeuralNetworkEmissions):
+    pass
 
 class _AutoRegressiveEmissionsMixin(object):
     """

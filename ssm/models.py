@@ -32,8 +32,10 @@ from ssm.hierarchical import \
 
 from ssm.emissions import \
     GaussianEmissions, \
+    GaussianCompoundEmissions, \
     GaussianIdentityEmissions, \
     GaussianNeuralNetworkEmissions, \
+    GaussianCompoundNeuralNetworkEmissions, \
     StudentsTEmissions, \
     StudentsTIdentityEmissions, \
     StudentsTNeuralNetworkEmissions, \
@@ -41,9 +43,10 @@ from ssm.emissions import \
     BernoulliIdentityEmissions, \
     BernoulliNeuralNetworkEmissions, \
     PoissonEmissions, \
-    PoissonConstrainedEmissions, \
+    PoissonCompoundEmissions, \
     PoissonIdentityEmissions, \
     PoissonNeuralNetworkEmissions, \
+    PoissonCompoundNeuralNetworkEmissions, \
     AutoRegressiveEmissions, \
     AutoRegressiveIdentityEmissions, \
     AutoRegressiveNeuralNetworkEmissions
@@ -209,6 +212,8 @@ def SLDS(N, K, D, M=0,
     # Make the emission distn
     emission_classes = dict(
         gaussian=GaussianEmissions,
+        gaussian_compound=GaussianCompoundEmissions,
+        gaussian_nn_compound=GaussianCompoundNeuralNetworkEmissions,
         gaussian_id=GaussianIdentityEmissions,
         gaussian_nn=GaussianNeuralNetworkEmissions,
         studentst=StudentsTEmissions,
@@ -218,9 +223,10 @@ def SLDS(N, K, D, M=0,
         t_id=StudentsTIdentityEmissions,
         t_nn=StudentsTNeuralNetworkEmissions,
         poisson=PoissonEmissions,
-        poisson_constrained=PoissonConstrainedEmissions,
+        poisson_compound=PoissonCompoundEmissions,
         poisson_id=PoissonIdentityEmissions,
         poisson_nn=PoissonNeuralNetworkEmissions,
+        poisson_nn_compound=PoissonCompoundNeuralNetworkEmissions,
         bernoulli=BernoulliEmissions,
         bernoulli_id=BernoulliIdentityEmissions,
         bernoulli_nn=BernoulliNeuralNetworkEmissions,
@@ -291,6 +297,8 @@ def LDS(N, D, M=0,
     # Make the emission distn
     emission_classes = dict(
         gaussian=GaussianEmissions,
+        gaussian_compound=GaussianCompoundEmissions,
+        gaussian_nn_compound=GaussianCompoundNeuralNetworkEmissions,
         gaussian_id=GaussianIdentityEmissions,
         gaussian_nn=GaussianNeuralNetworkEmissions,
         studentst=StudentsTEmissions,
@@ -300,9 +308,10 @@ def LDS(N, D, M=0,
         t_id=StudentsTIdentityEmissions,
         t_nn=StudentsTNeuralNetworkEmissions,
         poisson=PoissonEmissions,
-        poisson_constrained=PoissonConstrainedEmissions,
+        poisson_compound=PoissonCompoundEmissions,
         poisson_id=PoissonIdentityEmissions,
         poisson_nn=PoissonNeuralNetworkEmissions,
+        poisson_nn_compound=PoissonCompoundNeuralNetworkEmissions,
         bernoulli=BernoulliEmissions,
         bernoulli_id=BernoulliIdentityEmissions,
         bernoulli_nn=BernoulliNeuralNetworkEmissions,
