@@ -1,11 +1,11 @@
 # SSM: Bayesian learning and inference for state space models _with multiple neural populations_ 
-**This is an adaptation of the main package designed for fitting models with multiple, known, populations of neurons.**
+**This adaptation of the main ssm package is designed for fitting models with multiple, known, populations of neurons.**
 
 
 # Examples
 
 Let's say we want to fit a Poisson linear dynamical systems (PLDS) model to neurons coming from 2 known populations.
-We need to first set the number of latent variables (D) for each population, and make a vector of the number of neurons in each population.
+We need to first set the number of latent variables (D) for each population and make a vector of the number of neurons in each population.
 ```
 D_pop1=3
 D_pop2=3
@@ -16,12 +16,12 @@ num_units_pop2=20
 N_vec=[num_units_pop1,num_units_pop2]
 ```
 
-Declare the model
+Declare the model.
 ```
 plds = LDS(N=np.sum(N_vec),D=np.sum(D_vec),emissions="poisson_compound", emission_kwargs=dict(link="softplus",N_vec=N_vec,D_vec=D_vec))
 ```
 
-Let "ys" be your data matrix of size T (number of time points) x N (number of neurons). The neurons must be ordered in terms of which population they come from.<br>
+Let "ys" be your data matrix of size T (number of time points) x N (number of neurons). The neurons must be ordered in terms of which population they come from. In this example, the first 20 columns of "ys" would be for the first population. <br><br>
 Fit the model. 
 ```
 plds.initialize(ys)
