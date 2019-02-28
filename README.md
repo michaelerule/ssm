@@ -1,3 +1,28 @@
+# SSM: Bayesian learning and inference for state space models _with multiple neural populations_ 
+**This is an adaptation of the main package designed for fitting models with multiple, known, populations of neurons.**
+
+
+Examples will be posted soon.
+
+
+# Installation
+
+To install this forked repo:
+```
+git clone https://github.com/jglaser2/ssm
+cd ssm
+pip install -e .
+```
+
+
+The ReadMe for the original repo (at the time of forking) is below. We are currently many commits behind the main repo, but hope to merge soon.
+
+
+
+
+
+--------------------------------
+
 # SSM: Bayesian learning and inference for state space models 
 [![Test status](https://travis-ci.org/slinderman/ssm.svg?branch=master)](https://travis-ci.org/slinderman/ssm)
 
