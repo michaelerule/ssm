@@ -2,7 +2,35 @@
 **This is an adaptation of the main package designed for fitting models with multiple, known, populations of neurons.**
 
 
-Examples will be posted soon.
+# Examples
+
+Let's say we want to fit a Poisson linear dynamical systems (PLDS) model to neurons coming from 2 known populations.
+We need to first set the number of latent variables (D) for each population, and make a vector of the number of neurons in each population.
+```
+D_pop1=3
+D_pop2=3
+D_vec=[D_pop1,D_pop2]
+
+num_units_pop1=20
+num_units_pop2=20
+N_vec=[num_units_pop1,num_units_pop2]
+```
+
+Declare the model
+```
+plds = LDS(N=np.sum(N_vec),D=np.sum(D_vec),emissions="poisson_compound", emission_kwargs=dict(link="softplus",N_vec=N_vec,D_vec=D_vec))
+```
+
+Let "ys" be your data matrix of size T (number of time points) x N (number of neurons). The neurons must be ordered in terms of which population they come from.<br>
+Fit the model. 
+```
+plds.initialize(ys)
+q = SLDSTriDiagVariationalPosterior(plds, ys)
+elbos = plds.fit(q, ys, num_iters=7000, initialize=False)
+slds_x = q.mean[0]
+```
+
+Additional examples plus example notebooks will be coming shortly.
 
 
 # Installation
