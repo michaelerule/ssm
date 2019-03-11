@@ -22,18 +22,18 @@ class _Observations(object):
     @property
     def params(self):
         raise NotImplementedError
-    
+
     @params.setter
     def params(self, value):
         raise NotImplementedError
 
     def permute(self, perm):
         pass
-        
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         pass
-        
+
     def log_prior(self):
         return 0
 
@@ -43,13 +43,13 @@ class _Observations(object):
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         raise NotImplementedError
 
-    def m_step(self, expectations, datas, inputs, masks, tags, 
+    def m_step(self, expectations, datas, inputs, masks, tags,
                optimizer="adam", **kwargs):
         """
         If M-step cannot be done in closed form for the transitions, default to SGD.
         """
         optimizer = dict(sgd=sgd, adam=adam)[optimizer]
-        
+
         # expected log joint
         def _expected_log_joint(expectations):
             elbo = self.log_prior()
@@ -82,7 +82,7 @@ class GaussianObservations(_Observations):
     @property
     def params(self):
         return self.mus, self.inv_sigmas
-    
+
     @params.setter
     def params(self, value):
         self.mus, self.inv_sigmas = value
@@ -90,7 +90,7 @@ class GaussianObservations(_Observations):
     def permute(self, perm):
         self.mus = self.mus[perm]
         self.inv_sigmas = self.inv_sigmas[perm]
-        
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with KMeans
@@ -101,12 +101,12 @@ class GaussianObservations(_Observations):
         sigmas = np.array([np.var(data[km.labels_ == k], axis=0)
                            for k in range(self.K)])
         self.inv_sigmas = np.log(sigmas + 1e-16)
-        
+
     def log_likelihoods(self, data, input, mask, tag):
         mus, sigmas = self.mus, np.exp(self.inv_sigmas) + 1e-16
         mask = np.ones_like(data, dtype=bool) if mask is None else mask
         return -0.5 * np.sum(
-            (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
+            (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas)
             * mask[:, None, :], axis=2)
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
@@ -141,7 +141,7 @@ class StudentsTObservations(_Observations):
     @property
     def params(self):
         return self.mus, self.inv_sigmas, self.inv_nus
-    
+
     @params.setter
     def params(self, value):
         self.mus, self.inv_sigmas, self.inv_nus = value
@@ -149,8 +149,8 @@ class StudentsTObservations(_Observations):
     def permute(self, perm):
         self.mus = self.mus[perm]
         self.inv_sigmas = self.inv_sigmas[perm]
-        self.inv_nus = self.inv_nus[perm] 
-        
+        self.inv_nus = self.inv_nus[perm]
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with KMeans
@@ -162,7 +162,7 @@ class StudentsTObservations(_Observations):
                            for k in range(self.K)])
         self.inv_sigmas = np.log(sigmas + 1e-16)
         self.inv_nus = np.log(4) * np.ones(self.K)
-        
+
     def log_likelihoods(self, data, input, mask, tag):
         D, mus, sigmas, nus = self.D, self.mus, np.exp(self.inv_sigmas), np.exp(self.inv_nus)
         # mask = np.ones_like(data, dtype=bool) if mask is None else mask
@@ -191,13 +191,13 @@ class StudentsTObservations(_Observations):
         Student's t is a scale mixture of Gaussians.  We can estimate its
         parameters using the EM algorithm. See the notebook in doc/students_t for
         complete details.
-        """ 
+        """
         self._m_step_mu_sigma(expectations, datas, inputs, masks, tags)
         self._m_step_nu(expectations, datas, inputs, masks, tags)
 
     def _m_step_mu_sigma(self, expectations, datas, inputs, masks, tags):
         K, D = self.K, self.D
-    
+
         # Estimate the precisions w for each data point
         E_taus = []
         for y in datas:
@@ -212,21 +212,21 @@ class StudentsTObservations(_Observations):
         h = np.zeros((K, D))
         for E_tau, (Ez, _, _), y in zip(E_taus, expectations, datas):
             J += np.sum(Ez[:, :, None] * E_tau, axis=0)
-            h += np.sum(Ez[:, :, None] * E_tau * y[:, None, :], axis=0) 
+            h += np.sum(Ez[:, :, None] * E_tau * y[:, None, :], axis=0)
         self.mus = h / J
 
         # Update the variance
         sqerr = np.zeros((K, D))
         weight = np.zeros((K, D))
         for E_tau, (Ez, _, _), y in zip(E_taus, expectations, datas):
-            sqerr += np.sum(Ez[:, :, None] * E_tau * (y[:, None, :] - self.mus)**2, axis=0) 
+            sqerr += np.sum(Ez[:, :, None] * E_tau * (y[:, None, :] - self.mus)**2, axis=0)
             weight += np.sum(Ez[:, :, None], axis=0)
         self.inv_sigmas = np.log(sqerr / weight + 1e-16)
 
     def _m_step_nu(self, expectations, datas, inputs, masks, tags):
         """
         The shape parameter nu determines a gamma prior.  We have
-        
+
             tau_n ~ Gamma(nu/2, nu/2)
             y_n ~ N(mu, sigma^2 / tau_n)
 
@@ -245,7 +245,7 @@ class StudentsTObservations(_Observations):
             nus = np.exp(self.inv_nus[:, None])
             alpha = nus/2 + 1/2
             beta = nus/2 + 1/2 * (y[:, None, :] - self.mus)**2 / np.exp(self.inv_sigmas)
-            
+
             E_taus += np.sum(Ez[:, :, None] * alpha / beta, axis=(0, 2))
             E_logtaus += np.sum(Ez[:, :, None] * (digamma(alpha) - np.log(beta)), axis=(0, 2))
             weights += np.sum(Ez, axis=0) * D
@@ -261,28 +261,28 @@ class BernoulliObservations(_Observations):
     def __init__(self, K, D, M=0):
         super(BernoulliObservations, self).__init__(K, D, M)
         self.logit_ps = npr.randn(K, D)
-        
+
     @property
     def params(self):
         return self.logit_ps
-    
+
     @params.setter
     def params(self, value):
         self.logit_ps = value
-        
+
     def permute(self, perm):
         self.logit_ps = self.logit_ps[perm]
-        
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        
+
         # Initialize with KMeans
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
         km = KMeans(self.K).fit(data)
         ps = np.clip(km.cluster_centers_, 1e-3, 1-1e-3)
         self.logit_ps = logit(ps)
-        
+
     def log_likelihoods(self, data, input, mask, tag):
         assert (data.dtype == int or data.dtype == bool)
         assert data.ndim == 2 and data.shape[1] == self.D
@@ -316,27 +316,27 @@ class PoissonObservations(_Observations):
     def __init__(self, K, D, M=0):
         super(PoissonObservations, self).__init__(K, D, M)
         self.log_lambdas = npr.randn(K, D)
-        
+
     @property
     def params(self):
         return self.log_lambdas
-    
+
     @params.setter
     def params(self, value):
         self.log_lambdas = value
-        
+
     def permute(self, perm):
         self.log_lambdas = self.log_lambdas[perm]
-        
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        
+
         # Initialize with KMeans
         from sklearn.cluster import KMeans
         data = np.concatenate(datas)
         km = KMeans(self.K).fit(data)
         self.log_lambdas = np.log(km.cluster_centers_ + 1e-3)
-        
+
     def log_likelihoods(self, data, input, mask, tag):
         assert data.dtype == int
         lambdas = np.exp(self.log_lambdas)
@@ -366,27 +366,27 @@ class PoissonObservations(_Observations):
 class CategoricalObservations(_Observations):
     def __init__(self, K, D, M=0, C=2):
         """
-        @param C:  number of classes in the categorical observations 
+        @param C:  number of classes in the categorical observations
         """
         super(CategoricalObservations, self).__init__(K, D, M)
         self.C = C
         self.logits = npr.randn(K, D, C)
-        
+
     @property
     def params(self):
         return self.logits
-    
+
     @params.setter
     def params(self, value):
         self.logits = value
-        
+
     def permute(self, perm):
         self.logits = self.logits[perm]
-        
+
     @ensure_args_are_lists
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         pass
-        
+
     def log_likelihoods(self, data, input, mask, tag):
         assert (data.dtype == int or data.dtype == bool)
         assert data.ndim == 2 and data.shape[1] == self.D
@@ -420,18 +420,22 @@ class CategoricalObservations(_Observations):
 
 
 class AutoRegressiveObservations(_Observations):
-    def __init__(self, K, D, M=0, lags=1):
+    def __init__(self, K, D, M=0, lags=1,reg_type="none",reg_coef=0):
         super(AutoRegressiveObservations, self).__init__(K, D, M)
-        
+
+        #Regularization parameters of dynamics
+        self.reg_type=reg_type
+        self.reg_coef=reg_coef
+
         # Distribution over initial point
         self.mu_init = np.zeros(D)
         self.inv_sigma_init = np.zeros(D)
-        
+
         # AR parameters
-        assert lags > 0 
+        assert lags > 0
         self.lags = lags
         self.As = .95 * np.array([
-                np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))]) 
+                np.column_stack([random_rotation(D), np.zeros((D, (lags-1) * D))])
             for _ in range(K)])
         self.bs = npr.randn(K, D)
         self.Vs = npr.randn(K, D, M)
@@ -440,11 +444,11 @@ class AutoRegressiveObservations(_Observations):
     @property
     def params(self):
         return self.As, self.bs, self.Vs, self.inv_sigmas
-        
+
     @params.setter
     def params(self, value):
         self.As, self.bs, self.Vs, self.inv_sigmas = value
-        
+
     def permute(self, perm):
         self.As = self.As[perm]
         self.bs = self.bs[perm]
@@ -454,7 +458,7 @@ class AutoRegressiveObservations(_Observations):
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with linear regressions
         from sklearn.linear_model import LinearRegression
-        data = np.concatenate(datas) 
+        data = np.concatenate(datas)
         input = np.concatenate(inputs)
         T = data.shape[0]
 
@@ -463,14 +467,20 @@ class AutoRegressiveObservations(_Observations):
             x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
             y = data[ts+self.lags]
             lr = LinearRegression().fit(x, y)
+            # print(x.shape)
+            # lr2 = LinearRegression().fit(x[:,:6], y[:,:6]) #new
+            # lr3 = LinearRegression().fit(x[:,6:], y[:,6:])#new
+            # self.As[k] = np.zeros([self.D,self.D])
+            # self.As[k][:6,:6]=lr2.coef_
+            # self.As[k][6:,6:]=lr3.coef_
             self.As[k] = lr.coef_[:, :self.D * self.lags]
             self.Vs[k] = lr.coef_[:, self.D * self.lags:]
             self.bs[k] = lr.intercept_
-            
+
             resid = y - lr.predict(x)
             sigmas = np.var(resid, axis=0)
             self.inv_sigmas[k] = np.log(sigmas + 1e-16)
-        
+
     def _compute_mus(self, data, input, mask, tag):
         assert np.all(mask), "ARHMM cannot handle missing data"
         T, D = data.shape
@@ -481,7 +491,7 @@ class AutoRegressiveObservations(_Observations):
 
         # Lagged data
         for l in range(self.lags):
-            mus = mus + np.matmul(As[None, :, :, l*D:(l+1)*D], 
+            mus = mus + np.matmul(As[None, :, :, l*D:(l+1)*D],
                                   data[self.lags-l-1:-l-1, None, :, None])[:, :, :, 0]
 
         # Bias
@@ -496,7 +506,7 @@ class AutoRegressiveObservations(_Observations):
     def _compute_sigmas(self, data, input, mask, tag):
         T, D = data.shape
         inv_sigmas = self.inv_sigmas
-        
+
         sigma_init = np.exp(self.inv_sigma_init) * np.ones((self.lags, self.K, self.D))
         sigma_ar = np.repeat(np.exp(inv_sigmas)[None, :, :], T-self.lags, axis=0)
         sigmas = np.concatenate((sigma_init, sigma_ar))
@@ -507,8 +517,11 @@ class AutoRegressiveObservations(_Observations):
         mus = self._compute_mus(data, input, mask, tag)
         sigmas = self._compute_sigmas(data, input, mask, tag)
         return -0.5 * np.sum(
-            (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
+            (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas)
             * mask[:, None, :], axis=2)
+        # return -0.5 * np.sum(
+        #     (np.log(2 * np.pi ) + (data[:, None, :] - mus)**2 )
+        #     * mask[:, None, :], axis=2)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         K, D, M, lags = self.K, self.D, self.M, self.lags
@@ -517,10 +530,10 @@ class AutoRegressiveObservations(_Observations):
         for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             # Only use data if it is complete
             if not np.all(mask):
-                raise Exception("Encountered missing data in AutoRegressiveObservations!") 
+                raise Exception("Encountered missing data in AutoRegressiveObservations!")
 
             xs.append(
-                np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)] 
+                np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
                           + [input[self.lags:, :self.M], np.ones((data.shape[0]-self.lags, 1))]))
             ys.append(data[self.lags:])
             Ezs.append(Ez[self.lags:])
@@ -539,7 +552,7 @@ class AutoRegressiveObservations(_Observations):
             for d in range(D):
                 # This is a weak prior centered on zero
                 Jk = 1e-16 * np.eye(D * lags + M + 1)
-                hk = np.zeros((D * lags + M + 1,))                
+                hk = np.zeros((D * lags + M + 1,))
                 for x, y, Ez in zip(xs, ys, Ezs):
                     scale = Ez[:, k]
                     Jk += np.sum(scale[:, None, None] * x[:,:,None] * x[:, None,:], axis=0)
@@ -578,21 +591,31 @@ class AutoRegressiveObservations(_Observations):
         of latent discrete states.
         """
         T = expectations.shape[0]
-        mask = np.ones((T, self.D), dtype=bool) 
+        mask = np.ones((T, self.D), dtype=bool)
         mus = self._compute_mus(data, input, mask, tag)
         return (expectations[:, :, None] * mus).sum(1)
 
+    def log_prior(self):
+        alpha=-self.reg_coef
+        if self.reg_type=="none":
+            return 0
+        elif self.reg_type=='L1' or self.reg_type=='l1':
+            return alpha*np.sum(np.abs((self.As-np.identity(self.D))[:]))
+        elif self.reg_type=='L2' or self.reg_type=='l2':
+            return alpha*np.sum((self.As-np.identity(self.D))[:]**2)
+        else:
+            return 0
 
 class IndependentAutoRegressiveObservations(_Observations):
     def __init__(self, K, D, M=0, lags=1):
         super(IndependentAutoRegressiveObservations, self).__init__(K, D, M)
-        
+
         # Distribution over initial point
         self.mu_init = np.zeros(D)
         self.inv_sigma_init = np.zeros(D)
-        
+
         # AR parameters
-        assert lags > 0 
+        assert lags > 0
         self.lags = lags
         self.As = .95 * np.ones((K, D, lags))
         self.bs = npr.randn(K, D)
@@ -602,11 +625,11 @@ class IndependentAutoRegressiveObservations(_Observations):
     @property
     def params(self):
         return self.As, self.bs, self.Vs, self.inv_sigmas
-        
+
     @params.setter
     def params(self, value):
         self.As, self.bs, self.Vs, self.inv_sigmas = value
-        
+
     def permute(self, perm):
         self.As = self.As[perm]
         self.bs = self.bs[perm]
@@ -616,7 +639,7 @@ class IndependentAutoRegressiveObservations(_Observations):
     def initialize(self, datas, inputs=None, masks=None, tags=None):
         # Initialize with linear regressions
         from sklearn.linear_model import LinearRegression
-        data = np.concatenate(datas) 
+        data = np.concatenate(datas)
         input = np.concatenate(inputs)
         T = data.shape[0]
 
@@ -630,11 +653,11 @@ class IndependentAutoRegressiveObservations(_Observations):
                 self.As[k, d] = lr.coef_[:, :self.lags]
                 self.Vs[k, d] = lr.coef_[:, self.lags:self.lags+self.M]
                 self.bs[k, d] = lr.intercept_
-                
+
                 resid = y - lr.predict(x)
                 sigmas = np.var(resid, axis=0)
                 self.inv_sigmas[k, d] = np.log(sigmas + 1e-16)
-        
+
     def _compute_mus(self, data, input, mask, tag):
         T, D = data.shape
         As, bs, Vs = self.As, self.bs, self.Vs
@@ -653,7 +676,7 @@ class IndependentAutoRegressiveObservations(_Observations):
 
     def _compute_sigmas(self, data, input, mask, tag):
         T, D = data.shape
-        
+
         sigma_init = np.exp(self.inv_sigma_init) * np.ones((self.lags, self.K, self.D))
         sigma_ar = np.repeat(np.exp(self.inv_sigmas)[None, :, :], T-self.lags, axis=0)
         sigmas = np.concatenate((sigma_init, sigma_ar))
@@ -663,7 +686,7 @@ class IndependentAutoRegressiveObservations(_Observations):
     def log_likelihoods(self, data, input, mask, tag):
         mus = self._compute_mus(data, input, mask, tag)
         sigmas = self._compute_sigmas(data, input, mask, tag)
-        ll = -0.5 * (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas) 
+        ll = -0.5 * (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas)
         return np.sum(ll * mask[:, None, :], axis=2)
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
@@ -677,7 +700,7 @@ class IndependentAutoRegressiveObservations(_Observations):
                 # Only use data if it is complete
                 if np.all(mask[:, d]):
                     xs.append(
-                        np.hstack([data[self.lags-l-1:-l-1, d:d+1] for l in range(self.lags)] 
+                        np.hstack([data[self.lags-l-1:-l-1, d:d+1] for l in range(self.lags)]
                                   + [input[self.lags:, :M], np.ones((data.shape[0]-self.lags, 1))]))
                     ys.append(data[self.lags:, d])
                     weights.append(Ez[self.lags:])
@@ -717,7 +740,7 @@ class IndependentAutoRegressiveObservations(_Observations):
                 sqerr = (ys - yhats)**2
                 sigma = np.average(sqerr, weights=weights[:, k], axis=0) + 1e-16
                 self.inv_sigmas[k, d] = np.log(sigma)
-                
+
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
         D, As, bs, sigmas = self.D, self.As, self.bs, np.exp(self.inv_sigmas)
         if xhist.shape[0] < self.lags:
@@ -737,7 +760,7 @@ class IndependentAutoRegressiveObservations(_Observations):
         of latent discrete states.
         """
         T = expectations.shape[0]
-        mask = np.ones((T, self.D), dtype=bool) 
+        mask = np.ones((T, self.D), dtype=bool)
         mus = self._compute_mus(data, input, mask, tag)
         return (expectations[:, :, None] * mus).sum(1)
 
@@ -751,7 +774,7 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
     @property
     def params(self):
         return self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus
-        
+
     @params.setter
     def params(self, value):
         self.As, self.bs, self.Vs, self.inv_sigmas, self.inv_nus = value
@@ -772,13 +795,13 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
             gammaln((nus + D) / 2.0) - gammaln(nus / 2.0) - D / 2.0 * np.log(nus) \
             -D / 2.0 * np.log(np.pi) - 0.5 * np.sum(np.log(sigmas), axis=-1)
 
-    def m_step(self, expectations, datas, inputs, masks, tags, 
+    def m_step(self, expectations, datas, inputs, masks, tags,
                num_em_iters=1, optimizer="adam", num_iters=10, **kwargs):
         """
         Student's t is a scale mixture of Gaussians.  We can estimate its
-        parameters using the EM algorithm. See the notebook in doc/students_t 
-        for complete details. 
-        """ 
+        parameters using the EM algorithm. See the notebook in doc/students_t
+        for complete details.
+        """
         self._m_step_ar(expectations, datas, inputs, masks, tags, num_em_iters)
         self._m_step_nu(expectations, datas, inputs, masks, tags, optimizer, num_iters, **kwargs)
 
@@ -790,10 +813,10 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
         for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
             # Only use data if it is complete
             if not np.all(mask):
-                raise Exception("Encountered missing data in AutoRegressiveObservations!") 
+                raise Exception("Encountered missing data in AutoRegressiveObservations!")
 
             xs.append(
-                np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)] 
+                np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
                           + [input[self.lags:, :self.M], np.ones((data.shape[0]-self.lags, 1))]))
             ys.append(data[self.lags:])
             Ezs.append(Ez[self.lags:])
@@ -846,7 +869,7 @@ class RobustAutoRegressiveObservations(AutoRegressiveObservations):
 
             alpha = nus/2 + 1/2
             beta = nus/2 + 1/2 * (data[:, None, :] - mus)**2 / sigmas
-            
+
             E_taus += np.sum(Ez[:, :, None] * alpha / beta, axis=(0, 2))
             E_logtaus += np.sum(Ez[:, :, None] * (digamma(alpha) - np.log(beta)), axis=(0, 2))
             weights += np.sum(Ez, axis=0) * D
@@ -878,12 +901,12 @@ class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
     A simple mixin to allow for smarter initialization.
     """
     def initialize(self, datas, inputs=None, masks=None, tags=None):
-        data = np.concatenate(datas) 
+        data = np.concatenate(datas)
         ddata = np.concatenate([np.gradient(d, axis=0) for d in datas])
         ddata = (ddata - ddata.mean(0)) / ddata.std(0)
         input = np.concatenate(inputs)
         T = data.shape[0]
-    
+
         # Cluster the data and its gradient before initializing
         from sklearn.cluster import KMeans
         km = KMeans(self.K)
@@ -892,16 +915,16 @@ class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
         z = km.labels_[:-self.lags]
 
         from sklearn.linear_model import LinearRegression
-        
+
         for k in range(self.K):
-            ts = np.where(z == k)[0]    
+            ts = np.where(z == k)[0]
             x = np.column_stack([data[ts + l] for l in range(self.lags)] + [input[ts]])
             y = data[ts+self.lags]
             lr = LinearRegression().fit(x, y)
             self.As[k] = lr.coef_[:, :self.D * self.lags]
             self.Vs[k] = lr.coef_[:, self.D * self.lags:]
             self.bs[k] = lr.intercept_
-            
+
             resid = y - lr.predict(x)
             sigmas = np.var(resid, axis=0)
             self.inv_sigmas[k] = np.log(sigmas + 1e-16)
@@ -910,13 +933,13 @@ class _RecurrentAutoRegressiveObservationsMixin(AutoRegressiveObservations):
 
 
 class RecurrentAutoRegressiveObservations(
-    _RecurrentAutoRegressiveObservationsMixin, 
+    _RecurrentAutoRegressiveObservationsMixin,
     AutoRegressiveObservations):
     pass
 
 
 class RecurrentRobustAutoRegressiveObservations(
-    _RecurrentAutoRegressiveObservationsMixin, 
+    _RecurrentAutoRegressiveObservationsMixin,
     RobustAutoRegressiveObservations):
     pass
 
@@ -991,5 +1014,3 @@ class VonMisesObservations(_Observations):
     def smooth(self, expectations, data, input, tag):
         mus = self.mus
         return expectations.dot(mus)
-
-
