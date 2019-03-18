@@ -420,12 +420,15 @@ class CategoricalObservations(_Observations):
 
 
 class AutoRegressiveObservations(_Observations):
-    def __init__(self, K, D, M=0, lags=1,reg_type="none",reg_coef=0):
+    def __init__(self, K, D, M=0, lags=1,reg_type="none",reg_coef=0,D_vec=0,W_inv=0,W=0):
         super(AutoRegressiveObservations, self).__init__(K, D, M)
 
         #Regularization parameters of dynamics
         self.reg_type=reg_type
         self.reg_coef=reg_coef
+        self.D_vec=D_vec
+        self.W_inv=W_inv
+        self.W=W
 
         # Distribution over initial point
         self.mu_init = np.zeros(D)
@@ -603,8 +606,29 @@ class AutoRegressiveObservations(_Observations):
             return alpha*np.sum(np.abs((self.As-np.identity(self.D))[:]))
         elif self.reg_type=='L2' or self.reg_type=='l2':
             return alpha*np.sum((self.As-np.identity(self.D))[:]**2)
+        elif self.reg_type=='group_lasso':
+            D_vec=self.D_vec
+            P=len(D_vec)
+            D_vec_cumsum=np.concatenate(([0],np.cumsum(D_vec)))
+            group_sums = [np.sqrt(D_vec[i]*D_vec[j])*np.linalg.norm((self.As[k]-np.identity(self.D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]]) for i in range(P) for j in range(P) for k in range(self.K)]
+            return alpha*np.sum(group_sums)
+        elif self.reg_type=='con_L1' or self.reg_type=='con_l1':
+            return alpha*np.sum(np.abs((self.W_inv*(self.As-np.identity(self.D)))[:]))
+        elif self.reg_type=='con_L2' or self.reg_type=='con_l2':
+            return alpha*np.sum((self.W_inv*(self.As-np.identity(self.D)))[:]**2)
+        elif self.reg_type=='con_group_lasso':
+            D_vec=self.D_vec
+            P=len(D_vec)
+            D_vec_cumsum=np.concatenate(([0],np.cumsum(D_vec)))
+            group_sums = [self.W_inv[i,j]*np.sqrt(D_vec[i]*D_vec[j])*np.linalg.norm((self.As[k]-np.identity(self.D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]]) for i in range(P) for j in range(P) for k in range(self.K)]
+            return alpha*np.sum(group_sums)
+        elif self.reg_type=='con_matching_L2' or self.reg_type=='con_matching_l2':
+            return alpha*np.sum((self.As-self.W)[:]**2)
+        elif self.reg_type=='con_matching_L1' or self.reg_type=='con_matching_l1':
+            return alpha*np.sum(np.abs((self.As-self.W)[:]))
         else:
-            return 0
+            #Error: This is not a valid regularization type
+            raise NotImplementedError('This is not a valid regularization type')
 
 class IndependentAutoRegressiveObservations(_Observations):
     def __init__(self, K, D, M=0, lags=1):
