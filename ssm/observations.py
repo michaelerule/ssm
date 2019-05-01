@@ -519,9 +519,22 @@ class AutoRegressiveObservations(_Observations):
     def log_likelihoods(self, data, input, mask, tag):
         mus = self._compute_mus(data, input, mask, tag)
         sigmas = self._compute_sigmas(data, input, mask, tag)
-        return -0.5 * np.sum(
+        ll = -0.5 * np.sum(
             (np.log(2 * np.pi * sigmas) + (data[:, None, :] - mus)**2 / sigmas)
             * mask[:, None, :], axis=2)
+
+        alpha=0 #1000
+        # penalty=-alpha*(np.std(data)-1)**2
+        penalty=-alpha*(np.sum((np.std(data,axis=0)-1)**2))
+        ll=ll+penalty
+
+        return ll
+
+
+        # alpha=1
+        # penalty=-alpha*data**2
+        # ll=ll+penalty
+
         # return -0.5 * np.sum(
         #     (np.log(2 * np.pi ) + (data[:, None, :] - mus)**2 )
         #     * mask[:, None, :], axis=2)
@@ -612,6 +625,15 @@ class AutoRegressiveObservations(_Observations):
             D_vec_cumsum=np.concatenate(([0],np.cumsum(D_vec)))
             group_sums = [np.sqrt(D_vec[i]*D_vec[j])*np.linalg.norm((self.As[k]-np.identity(self.D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]]) for i in range(P) for j in range(P) for k in range(self.K)]
             return alpha*np.sum(group_sums)
+        elif self.reg_type=='nuc':
+            norms = [np.linalg.norm((self.As[k]-np.identity(self.D)),'nuc') for k in range(self.K)]
+            return alpha*np.sum(norms)
+        elif self.reg_type=='group_nuc':
+            D_vec=self.D_vec
+            P=len(D_vec)
+            D_vec_cumsum=np.concatenate(([0],np.cumsum(D_vec)))
+            group_norms = [np.linalg.norm((self.As[k]-np.identity(self.D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]],'nuc') for i in range(P) for j in range(P) for k in range(self.K)]
+            return alpha*np.sum(group_norms)
         elif self.reg_type=='con_L1' or self.reg_type=='con_l1':
             return alpha*np.sum(np.abs((self.W_inv*(self.As-np.identity(self.D)))[:]))
         elif self.reg_type=='con_L2' or self.reg_type=='con_l2':
@@ -629,6 +651,106 @@ class AutoRegressiveObservations(_Observations):
         else:
             #Error: This is not a valid regularization type
             raise NotImplementedError('This is not a valid regularization type')
+
+
+class IdentityAutoRegressiveObservations(_Observations):
+    def __init__(self, K, D, M):
+        super(IdentityAutoRegressiveObservations, self).__init__(K, D, M)
+        self.inv_sigmas = -2 + npr.randn(K, D) #inv_sigma is the log of the variance
+        self.inv_sigma_init= np.zeros(D) #inv_sigma_init is the log of the variance of the initial data point
+        self.K=K
+        self.D=D
+
+    @property
+    def params(self):
+        return self.inv_sigmas
+
+    @params.setter
+    def params(self, value):
+        self.inv_sigmas = value
+
+    def permute(self, perm):
+        self.inv_sigmas = self.inv_sigmas[perm]
+
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        # sigmas=np.var(datas[1:]-datas[:-1])
+        self.inv_sigmas = -2 + npr.randn(self.K, self.D)#np.log(sigmas + 1e-16)
+
+    # def _compute_sigmas(self, data, input, mask, tag):
+    #     T, D = data.shape
+    #     inv_sigmas = self.inv_sigmas
+    #
+    #     sigma_init = np.exp(self.inv_sigma_init) * np.ones((self.lags, self.K, self.D))
+    #     sigma_ar = np.repeat(np.exp(inv_sigmas)[None, :, :], T-self.lags, axis=0)
+    #     sigmas = np.concatenate((sigma_init, sigma_ar))
+    #     assert sigmas.shape == (T, self.K, D)
+    #     return sigmas
+    #
+    def log_likelihoods(self, data, input, mask, tag):
+        sigmas = np.exp(self.inv_sigmas) + 1e-16
+        sigma_init=np.exp(self.inv_sigma_init)+1e-16
+
+        #Log likelihood of data (except for first point)
+        ll1 = -0.5 * np.sum(
+            (np.log(2 * np.pi * sigmas) + (data[1:, None, :] - data[:-1, None, :])**2 / sigmas)
+            * mask[1:, None, :], axis=2)
+
+        # ll2= -0.5 * np.sum(
+        #     (np.log(2 * np.pi * sigma_init) + (data[0, None, :]) / sigma_init), axis=1) #Make 0 instead of data[0...]???
+
+        #Log likelihood of first point (just setting to 0, since we're not fitting sigma_init)
+        ll2=np.array([0])
+
+        #Log likelihood of all data points (including first)
+        ll=np.concatenate((ll1,ll2[:,np.newaxis]),axis=0)
+
+
+        # print(ll.shape)
+        return ll
+
+        # return -0.5 * np.sum(
+        #     (np.log(2 * np.pi * sigmas) + (data[1:, None, :] - data[:-1, None, :])**2 / sigmas)
+        #     * mask[1:, None, :], axis=2)
+
+
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        D = self.D
+        sigmas = np.exp(self.inv_sigmas) if with_noise else np.zeros((self.K, self.D))
+        sigma_init = np.exp(self.inv_sigma_init) if with_noise else 0
+
+        if xhist.shape[0] == 0:
+            return np.sqrt(sigma_init[z]) * npr.randn(D)
+        else:
+            return xhist[-1] + np.sqrt(sigmas[z]) * npr.randn(D)
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
+        for k in range(self.K):
+            # self.mus[k] = np.average(x, axis=0, weights=weights[:,k])
+            sqerr = (x[1:] - x[:-1])**2
+            d2=np.average(sqerr, weights=weights[1:,k], axis=0)
+
+
+            self.inv_sigmas[k] = np.log(d2)
+
+            #
+            # print("is",self.inv_sigmas)
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        raise NotImplementedError
+        # return expectations.dot(data)
+
+
+
+
+
+
 
 class IndependentAutoRegressiveObservations(_Observations):
     def __init__(self, K, D, M=0, lags=1):

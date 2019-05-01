@@ -3,6 +3,8 @@ import autograd.numpy.random as npr
 from autograd.scipy.special import gammaln
 from autograd.scipy.linalg import block_diag
 
+from sklearn.decomposition import PCA
+
 from ssm.util import ensure_args_are_lists, ensure_args_not_none, \
     ensure_slds_args_not_none, logistic, logit, softplus, inv_softplus
 from ssm.preprocessing import interpolate_data, pca_with_imputation
@@ -511,8 +513,9 @@ class _NeuralNetworkEmissions(_Emissions):
         # Initialize the neural network weights
         assert N > D
         layer_sizes = (D + M,) + hidden_layer_sizes + (N,)
-        self.weights = [npr.randn(m, n) for m, n in zip(layer_sizes[:-1], layer_sizes[1:])]
+        self.weights = [npr.randn(m, n)*np.sqrt(1./m) for m, n in zip(layer_sizes[:-1], layer_sizes[1:])] #added division by sqrt(m)
         self.biases = [npr.randn(n) for n in layer_sizes[1:]]
+        # self.biases = [np.zeros(n) for n in layer_sizes[1:]]
 
     @property
     def params(self):
@@ -537,7 +540,18 @@ class _NeuralNetworkEmissions(_Emissions):
         """
         Inverse is... who knows!
         """
+        # pca=PCA(self.D)
+        # return pca.fit_transform(data)
         return npr.randn(data.shape[0], self.D)
+
+    def log_prior(self):
+        alpha=10
+        ssq_w=[np.sum(i**2) for i in self.weights]
+        # ssq_b=[np.sum(i**2) for i in self.biases]
+        return -np.sum(alpha*ssq_w)
+        # print(self.weights)
+        # print(np.array(self.weights)**2)
+        # return 1#-alpha*np.sum(np.sum(np.array(self.weights)**2))-alpha*np.sum(np.sum(np.array(self.biases)**2))
 
 # Allow general nonlinear emission models with neural networks
 class _CompoundNeuralNetworkEmissions(_Emissions):
@@ -546,7 +560,7 @@ class _CompoundNeuralNetworkEmissions(_Emissions):
         super(_CompoundNeuralNetworkEmissions, self).__init__(N, K, D, M=M, single_subspace=True)
 
 
-        # print(hidden_layer_sizes)
+        print(hidden_layer_sizes)
         #Make sure N_vec and D_vec are in correct form
         assert isinstance(N_vec, (np.ndarray, list, tuple))
         N_vec = np.array(N_vec, dtype=int)
@@ -591,7 +605,29 @@ class _CompoundNeuralNetworkEmissions(_Emissions):
         """
         Inverse is... who knows!
         """
-        return npr.randn(data.shape[0], self.D)
+        # print(data.shape)
+        assert data.shape[1] == self.N
+        N_offsets = np.cumsum(self.N_vec)[:-1]
+        states = []
+        for em, dp, mp in zip(self.emissions_models,
+                            np.split(data, N_offsets, axis=1),
+                            np.split(mask, N_offsets, axis=1)):
+            states.append(em._invert(dp, input, mp, tag))
+        return np.column_stack(states)
+
+
+        # return npr.randn(data.shape[0], self.D)
+
+
+    def log_prior(self):
+        alpha=1
+        ssq_all=[]
+        for em in self.emissions_models:
+            ssq_w=[np.sum(i**2) for i in em.weights]
+            # ssq_b=[np.sum(i**2) for i in em.biases]
+            # ssq_all.append(-np.sum(alpha*ssq_w+alpha*ssq_b))
+            ssq_all.append(-np.sum(alpha*ssq_w))
+        return np.sum(ssq_all)
 
 
 # Observation models for SLDS

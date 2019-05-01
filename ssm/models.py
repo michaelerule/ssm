@@ -19,6 +19,7 @@ from ssm.observations import \
     CategoricalObservations, \
     StudentsTObservations, \
     AutoRegressiveObservations, \
+    IdentityAutoRegressiveObservations, \
     IndependentAutoRegressiveObservations, \
     RobustAutoRegressiveObservations, \
     RecurrentAutoRegressiveObservations, \
@@ -112,6 +113,7 @@ def HMM(K, D, M=0,
         vonmises=VonMisesObservations,
         ar=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
         autoregressive=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
+        identity_ar=IdentityAutoRegressiveObservations,
         independent_ar=IndependentAutoRegressiveObservations,
         robust_ar=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
         robust_autoregressive=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
@@ -195,6 +197,7 @@ def SLDS(N, K, D, M=0,
         gaussian=RecurrentAutoRegressiveObservations if is_recurrent else AutoRegressiveObservations,
         t=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
         studentst=RecurrentRobustAutoRegressiveObservations if is_recurrent else RobustAutoRegressiveObservations,
+        identity_ar=IdentityAutoRegressiveObservations,
         )
 
     dynamics = dynamics.lower()
@@ -281,6 +284,7 @@ def LDS(N, D, M=0,
         gaussian=AutoRegressiveObservations,
         t=RobustAutoRegressiveObservations,
         studentst=RobustAutoRegressiveObservations,
+        identity_ar=IdentityAutoRegressiveObservations,
         )
 
     dynamics = dynamics.lower()
