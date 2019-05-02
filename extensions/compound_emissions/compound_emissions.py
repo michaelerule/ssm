@@ -61,7 +61,7 @@ class _CompoundLinearEmissions(_Emissions):
 
     @property
     def params(self):
-        return [em.params for em in self.emissions_models]
+        return tuple(em.params for em in self.emissions_models)
 
     @params.setter
     def params(self, value):

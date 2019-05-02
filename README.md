@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # SSM: Bayesian learning and inference for state space models _with multiple neural populations_ 
 **This adaptation of the main ssm package is designed for fitting models with multiple, known, populations of neurons.**
 
@@ -52,14 +53,18 @@ The ReadMe for the original repo (at the time of forking) is below. We are curre
 --------------------------------
 
 # SSM: Bayesian learning and inference for state space models 
+=======
+# SSM: Bayesian learning and inference for state space models
+>>>>>>> 38078d66db72005de99701ab42b5309024d14d6f
 [![Test status](https://travis-ci.org/slinderman/ssm.svg?branch=master)](https://travis-ci.org/slinderman/ssm)
 
-This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models. 
+This package has fast and flexible code for simulating, learning, and performing inference in a variety of state space models.
 Currently, it supports:
 
 - Hidden Markov Models (HMM)
 - Auto-regressive HMMs (ARHMM)
 - Input-output HMMs (IOHMM)
+- Hidden Semi-Markov Models (HSMM)
 - Linear Dynamical Systems (LDS)
 - Switching Linear Dynamical Systems (SLDS)
 - Recurrent SLDS (rSLDS)
@@ -72,8 +77,10 @@ We support the following observation models:
 - Student's t
 - Bernoulli
 - Poisson
+- Categorical
+- Von Mises
 
-HMM inference is done with either expectation maximization (EM) or stochastic gradient descent (SGD).  For SLDS, we use stochastic variational inference (SVI). 
+HMM inference is done with either expectation maximization (EM) or stochastic gradient descent (SGD).  For SLDS, we use stochastic variational inference (SVI).
 
 # Examples
 Here's a snippet to illustrate how we simulate from an HMM.
@@ -88,19 +95,20 @@ hmm = HMM(K, D, observations="gaussian")
 z, y = hmm.sample(T)
 ```
 
-Fitting an HMM is simple. 
+Fitting an HMM is simple.
 ```
 test_hmm = HMM(K, D, observations="gaussian")
 test_hmm.fit(y)
 zhat = test_hmm.most_likely_states(y)
 ```
 
-The notebooks folder has more thorough, complete examples of HMMs, SLDS, and recurrent SLDS.  
+The notebooks folder has more thorough, complete examples of HMMs, SLDS, and recurrent SLDS.
 
 # Installation
 ```
 git clone git@github.com:slinderman/ssm.git
 cd ssm
+pip install numpy cython
 pip install -e .
 ```
 This will install "from source" and compile the Cython code for fast message passing and gradients.

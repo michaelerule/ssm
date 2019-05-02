@@ -13,7 +13,7 @@ def pca_with_imputation(D, datas, masks, num_iters=20):
     # Flatten the data and masks
     data = np.concatenate(datas)
     mask = np.concatenate(masks)
-    
+
     if np.any(~mask):
         # Fill in missing data with mean to start
         fulldata = data.copy()
@@ -24,20 +24,24 @@ def pca_with_imputation(D, datas, masks, num_iters=20):
             # Run PCA on imputed data
             pca = PCA(D)
             x = pca.fit_transform(fulldata)
-            
+
             # Fill in missing data with PCA predictions
             pred = pca.inverse_transform(x)
             fulldata[~mask] = pred[~mask]
+
+        ll = pca.score(fulldata)
+
     else:
         pca = PCA(D)
         x = pca.fit_transform(data)
-        
+        ll = pca.score(data)
+
     # Unpack xs
     xs = np.split(x, np.cumsum([len(data) for data in datas])[:-1])
     assert len(xs) == len(datas)
     assert all([x.shape[0] == data.shape[0] for x, data in zip(xs, datas)])
 
-    return pca, xs
+    return pca, xs, ll
 
 
 def factor_analysis_with_imputation(D, datas, masks=None, num_iters=50):
@@ -69,25 +73,36 @@ def factor_analysis_with_imputation(D, datas, masks=None, num_iters=50):
         pbar.update(1)
     lls = np.array(lls)
 
-    # Get the continuous states and rotate them with SVD
-    # so that the emission matrix C is orthogonal and sorted
-    # in order of decreasing explained variance
-    xs = [states.Z for states in fa.data_list]
+    # Get the continuous states and their covariances
+    E_xs = [states.E_Z for states in fa.data_list]
+    E_xxTs = [states.E_ZZT for states in fa.data_list]
+    Cov_xs = [E_xxT - E_x[:, :, None] * E_x[:, None, :] for E_x, E_xxT in zip(E_xs, E_xxTs)]
+
+    # Rotate the states with SVD so that the columns of the
+    # emission matrix, C, are orthogonal and sorted in order
+    # of decreasing explained variance.
+    #
+    # Note: the columns of C are not normalized like in PCA!
+    # This is because factor analysis assumes the latents are
+    # distributed according to a standard normal distribution.
+    # The FA latents are only invariant to *orthogonal* transforms.
+    # Thus, the scaling must be accounted for in C.
     C, S, VT = np.linalg.svd(fa.W, full_matrices=False)
-    xhats = [x.dot(VT.T) * S for x in xs]
+    xhats = [x.dot(VT.T) for x in E_xs]
+    Cov_xhats = [np.matmul(np.matmul(VT[None, :, :], Cov_x), VT.T[None, :, :]) for Cov_x in Cov_xs]
 
     # Test that we got this right
-    for x, xhat in zip(xs, xhats):
+    for x, xhat in zip(E_xs, xhats):
         y = x.dot(fa.W.T) + fa.mean
-        yhat = xhat.dot(C.T) + fa.mean
+        yhat = xhat.dot((C * S).T) + fa.mean
         assert np.allclose(y, yhat)
 
-    # Strip out the data from the factor analysis model, 
+    # Strip out the data from the factor analysis model,
     # update the emission matrix
-    fa.regression.A = C
+    fa.regression.A = C * S
     fa.data_list = []
 
-    return fa, xhats, lls
+    return fa, xhats, Cov_xhats, lls
 
 
 def interpolate_data(data, mask):
@@ -130,12 +145,13 @@ def trend_filter(data, npoly=1, nexp=0):
     for k in range(nexp):
         tau = T / (k+1)
         features[:, npoly+k] = np.exp(-t / tau)
-        
+
     lr.fit(features, data)
     trend = lr.predict(features)
     return data - trend
 
-def standardize(data, mask): 
+
+def standardize(data, mask):
     data2 = data.copy()
     data2[~mask] = np.nan
     m = np.nanmean(data2, axis=0)

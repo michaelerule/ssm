@@ -1,7 +1,7 @@
 # distutils: extra_compile_args = -O3
-# cython: wraparound=True
-# cython: boundscheck=True
-# cython: nonecheck=True
+# cython: wraparound=False
+# cython: boundscheck=False
+# cython: nonecheck=False
 # cython: cdivision=True
 
 import numpy as np
@@ -128,7 +128,7 @@ cpdef backward_sample(double[:,:,::1] log_Ps,
             lpz[k] = lpzp1[k] + alphas[t, k]
         Z = logsumexp(lpz)
 
-        # sample 
+        # sample
         acc = 0
         zs[t] = K-1
         for k in range(K):
