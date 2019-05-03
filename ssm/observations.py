@@ -730,11 +730,12 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         elif isinstance(regularization_params, dict):
             # TODO: Validate the dictionary key/value pairs
             reg_type = regularization_params["type"]
-            if reg_type.lower() == "l1" or reg_type.lower() == "l2":
+            if reg_type.lower() == "l1" or reg_type.lower() == "l2" or reg_type.lower()=='group_lasso' or reg_type.lower()=='group_lasso_nodiag':
                 prms = dict(lambda_A=0, lambda_V=0)
                 prms.update(regularization_params)
 
-            self.regularization_params = prms
+                self.regularization_params = prms
+
 
         else:
             raise Exception("regularization_params must be a None or a dictionary.")
@@ -807,22 +808,38 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         reg_type = regularization_params["type"]
 
         if reg_type.lower() =='l1':
-            lambda_A = regularization_params["lambda_A"]
+            lambda_A = -regularization_params["lambda_A"]
             return lambda_A * np.sum(np.abs(As - np.identity(D)))
 
         elif reg_type.lower() =='l2':
-            lp = regularization_params["lambda_A"] * np.sum((As - np.identity(D))**2)
-            lp += regularization_params["lambda_V"] * np.sum(Vs**2)
+            lp = -regularization_params["lambda_A"] * np.sum((As - np.identity(D))**2)
+            lp += -regularization_params["lambda_V"] * np.sum(Vs**2)
             return lp
 
-    #     elif reg_type.lower() == 'group_lasso':
-    #         alpha = regularization_params["alpha"]
-    #         D_vec = regularization_params["D_vec"]
-    #         P = len(D_vec)
-    #         D_vec_cumsum = np.concatenate(([0], np.cumsum(D_vec)))
-    #         group_sums = [np.sqrt(D_vec[i] * D_vec[j]) * np.linalg.norm((As[k]-np.identity(D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]])
-    #         for i in range(P) for j in range(P) for k in range(self.K)]
-    #         return alpha*np.sum(group_sums)
+        elif reg_type.lower() == 'group_lasso':
+            lambda_A = -regularization_params["lambda_A"]
+            D_vec = regularization_params["D_vec"]
+            P = len(D_vec) #Number of populations
+            D_vec_cumsum = np.concatenate(([0], np.cumsum(D_vec)))
+            group_sums = [np.sqrt(D_vec[i] * D_vec[j]) * np.linalg.norm((As[k]-np.identity(D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]]) for i in range(P) for j in range(P) for k in range(K)]
+            return lambda_A*np.sum(group_sums)
+
+        elif reg_type.lower() == 'group_lasso_nodiag':
+            lambda_A = -regularization_params["lambda_A"]
+            D_vec = regularization_params["D_vec"]
+            P = len(D_vec) #Number of populations
+            D_vec_cumsum = np.concatenate(([0], np.cumsum(D_vec)))
+            group_sums = [np.sqrt(D_vec[i] * D_vec[j]) * np.linalg.norm((As[k]-np.diag(np.diag(As[k])))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]]) for i in range(P) for j in range(P) for k in range(K)]
+            return lambda_A*np.sum(group_sums)
+
+        elif reg_type.lower() == 'con_group_lasso':
+            lambda_A = -regularization_params["lambda_A"]
+            D_vec = regularization_params["D_vec"]
+            W_inv = regularization_params["W_inv"]
+            P=len(D_vec)
+            D_vec_cumsum=np.concatenate(([0],np.cumsum(D_vec)))
+            group_sums = [W_inv[i,j]*np.sqrt(D_vec[i]*D_vec[j])*np.linalg.norm((As[k]-np.identity(D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]]) for i in range(P) for j in range(P) for k in range(K)]
+            return alpha*np.sum(group_sums)
 
     #     elif reg_type.lower() == 'nuclear':
     #         norms = [np.linalg.norm((self.As[k]-np.identity(self.D)),'nuc') for k in range(self.K)]
@@ -841,12 +858,6 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     #     elif reg_type.lower() == 'con_l2':
     #         return alpha*np.sum((self.W_inv*(self.As-np.identity(self.D)))[:]**2)
 
-    #     elif reg_type.lower() == 'con_group_lasso':
-    #         D_vec=self.D_vec
-    #         P=len(D_vec)
-    #         D_vec_cumsum=np.concatenate(([0],np.cumsum(D_vec)))
-    #         group_sums = [self.W_inv[i,j]*np.sqrt(D_vec[i]*D_vec[j])*np.linalg.norm((self.As[k]-np.identity(self.D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]]) for i in range(P) for j in range(P) for k in range(self.K)]
-    #         return alpha*np.sum(group_sums)
 
     #     elif reg_type.lower() == 'con_matching_l2':
     #         return alpha*np.sum((self.As-self.W)[:]**2)

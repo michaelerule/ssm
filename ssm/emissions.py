@@ -155,6 +155,10 @@ class _LinearEmissions(_Emissions):
 
         return pca
 
+    def log_prior(self):
+        # return 0
+        alpha=10000
+        return -alpha*np.sum(np.abs(self.Cs))
 
 class _OrthogonalLinearEmissions(_LinearEmissions):
     """

@@ -166,7 +166,8 @@ class _CompoundOrthogonalLinearEmissions(_Emissions):
 
     @property
     def params(self):
-        return [em.params for em in self.emissions_models]
+        return tuple(em.params for em in self.emissions_models)
+        # return [em.params for em in self.emissions_models]
 
     @params.setter
     def params(self, value):
@@ -332,4 +333,3 @@ class PoissonOrthogonalCompoundEmissions(_PoissonEmissionsMixin, _CompoundOrthog
 
 class PoissonCompoundNeuralNetworkEmissions(_PoissonEmissionsMixin, _CompoundNeuralNetworkEmissions):
     pass
-
