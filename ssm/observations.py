@@ -730,7 +730,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         elif isinstance(regularization_params, dict):
             # TODO: Validate the dictionary key/value pairs
             reg_type = regularization_params["type"]
-            if reg_type.lower() == "l1" or reg_type.lower() == "l2" or reg_type.lower()=='group_lasso' or reg_type.lower()=='group_lasso_nodiag':
+            if reg_type.lower() in ("l1","l2","l2_diff","group_lasso",'group_lasso_nodiag','con_group_lasso'):
                 prms = dict(lambda_A=0, lambda_V=0)
                 prms.update(regularization_params)
 
@@ -766,7 +766,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         super(AutoRegressiveObservations, self).permute(perm)
         self._sqrt_Sigmas = self._sqrt_Sigmas[perm]
 
-    def initialize(self, datas, inputs=None, masks=None, tags=None, localize=True):
+    def initialize(self, datas, inputs=None, masks=None, tags=None, localize=False):
         from sklearn.linear_model import LinearRegression
 
         # Sample time bins for each discrete state
@@ -812,6 +812,11 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             return lambda_A * np.sum(np.abs(As - np.identity(D)))
 
         elif reg_type.lower() =='l2':
+            lp = -regularization_params["lambda_A"] * np.sum((As)**2)
+            lp += -regularization_params["lambda_V"] * np.sum(Vs**2)
+            return lp
+
+        elif reg_type.lower() =='l2_diff':
             lp = -regularization_params["lambda_A"] * np.sum((As - np.identity(D))**2)
             lp += -regularization_params["lambda_V"] * np.sum(Vs**2)
             return lp
@@ -839,7 +844,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             P=len(D_vec)
             D_vec_cumsum=np.concatenate(([0],np.cumsum(D_vec)))
             group_sums = [W_inv[i,j]*np.sqrt(D_vec[i]*D_vec[j])*np.linalg.norm((As[k]-np.identity(D))[D_vec_cumsum[i]:D_vec_cumsum[i+1],D_vec_cumsum[j]:D_vec_cumsum[j+1]]) for i in range(P) for j in range(P) for k in range(K)]
-            return alpha*np.sum(group_sums)
+            return lambda_A*np.sum(group_sums)
 
     #     elif reg_type.lower() == 'nuclear':
     #         norms = [np.linalg.norm((self.As[k]-np.identity(self.D)),'nuc') for k in range(self.K)]
@@ -883,6 +888,10 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
     def m_step(self, expectations, datas, inputs, masks, tags, J0=None, h0=None):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
+        i_flag=0
+        if self.regularization_params["type"].lower() in ("l2_diff",):
+            i_flag=1
+
         # Collect all the data
         xs, ys, Ezs = [], [], []
         for (Ez, _, _), data, input, mask, tag in zip(expectations, datas, inputs, masks, tags):
@@ -893,11 +902,14 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
             xs.append(
                 np.hstack([data[self.lags-l-1:-l-1] for l in range(self.lags)]
                           + [input[self.lags:, :self.M], np.ones((data.shape[0]-self.lags, 1))]))
-            ys.append(data[self.lags:])
+            if i_flag==0:
+                ys.append(data[self.lags:])
+            if i_flag==1:
+                ys.append(data[self.lags:]-data[self.lags-1:-1])
             Ezs.append(Ez[self.lags:])
 
         # M step: Fit the weighted linear regressions for each K and D
-        if not self.regularization_params["type"].lower() in ("l2",):
+        if not self.regularization_params["type"].lower() in ("l2","l2_diff"):
             warnings.warn("M-step only supports L2 regularization for now.")
 
         if J0 is None and h0 is None:
@@ -925,7 +937,11 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
                 h[k] += np.dot(weighted_x.T, y)
 
         mus = np.linalg.solve(J, h)
+
         self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
+        if i_flag==1:
+            self.As=self.As+np.identity(D)
+
         self.Vs = np.swapaxes(mus[:, D*lags:D*lags+M, :], 1, 2)
         self.bs = mus[:, -1, :]
 
@@ -1059,97 +1075,106 @@ class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
 class IdentityAutoRegressiveObservations(_Observations):
     pass
 
-#     def __init__(self, K, D, M):
-#         super(IdentityAutoRegressiveObservations, self).__init__(K, D, M)
-#         self.inv_sigmas = -2 + npr.randn(K, D) #inv_sigma is the log of the variance
-#         self.inv_sigma_init= np.zeros(D) #inv_sigma_init is the log of the variance of the initial data point
-#         self.K=K
-#         self.D=D
+    def __init__(self, K, D, M):
+        super(IdentityAutoRegressiveObservations, self).__init__(K, D, M)
+        self.inv_sigmas = -2 + npr.randn(K, D) #inv_sigma is the log of the variance
+        self.inv_sigma_init= np.zeros(D) #inv_sigma_init is the log of the variance of the initial data point
+        self.K=K
+        self.D=D
 
-#     @property
-#     def params(self):
-#         return self.inv_sigmas
+    @property
+    def params(self):
+        return self.inv_sigmas
 
-#     @params.setter
-#     def params(self, value):
-#         self.inv_sigmas = value
+    @params.setter
+    def params(self, value):
+        self.inv_sigmas = value
 
-#     def permute(self, perm):
-#         self.inv_sigmas = self.inv_sigmas[perm]
+    def permute(self, perm):
+        self.inv_sigmas = self.inv_sigmas[perm]
 
-#     @ensure_args_are_lists
-#     def initialize(self, datas, inputs=None, masks=None, tags=None):
-#         # sigmas=np.var(datas[1:]-datas[:-1])
-#         self.inv_sigmas = -2 + npr.randn(self.K, self.D)#np.log(sigmas + 1e-16)
+    @ensure_args_are_lists
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        # sigmas=np.var(datas[1:]-datas[:-1])
+        self.inv_sigmas = -2 + npr.randn(self.K, self.D)#np.log(sigmas + 1e-16)
 
-#     # def _compute_sigmas(self, data, input, mask, tag):
-#     #     T, D = data.shape
-#     #     inv_sigmas = self.inv_sigmas
-#     #
-#     #     sigma_init = np.exp(self.inv_sigma_init) * np.ones((self.lags, self.K, self.D))
-#     #     sigma_ar = np.repeat(np.exp(inv_sigmas)[None, :, :], T-self.lags, axis=0)
-#     #     sigmas = np.concatenate((sigma_init, sigma_ar))
-#     #     assert sigmas.shape == (T, self.K, D)
-#     #     return sigmas
-#     #
-#     def log_likelihoods(self, data, input, mask, tag):
-#         sigmas = np.exp(self.inv_sigmas) + 1e-16
-#         sigma_init=np.exp(self.inv_sigma_init)+1e-16
+    # def _compute_sigmas(self, data, input, mask, tag):
+    #     T, D = data.shape
+    #     inv_sigmas = self.inv_sigmas
+    #
+    #     sigma_init = np.exp(self.inv_sigma_init) * np.ones((self.lags, self.K, self.D))
+    #     sigma_ar = np.repeat(np.exp(inv_sigmas)[None, :, :], T-self.lags, axis=0)
+    #     sigmas = np.concatenate((sigma_init, sigma_ar))
+    #     assert sigmas.shape == (T, self.K, D)
+    #     return sigmas
+    #
+    def log_likelihoods(self, data, input, mask, tag):
+        sigmas = np.exp(self.inv_sigmas) + 1e-16
+        sigma_init=np.exp(self.inv_sigma_init)+1e-16
 
-#         #Log likelihood of data (except for first point)
-#         ll1 = -0.5 * np.sum(
-#             (np.log(2 * np.pi * sigmas) + (data[1:, None, :] - data[:-1, None, :])**2 / sigmas)
-#             * mask[1:, None, :], axis=2)
+        #Log likelihood of data (except for first point)
+        ll1 = -0.5 * np.sum(
+            (np.log(2 * np.pi * sigmas) + (data[1:, None, :] - data[:-1, None, :])**2 / sigmas)
+            * mask[1:, None, :], axis=2)
 
-#         # ll2= -0.5 * np.sum(
-#         #     (np.log(2 * np.pi * sigma_init) + (data[0, None, :]) / sigma_init), axis=1) #Make 0 instead of data[0...]???
+        # ll2= -0.5 * np.sum(
+        #     (np.log(2 * np.pi * sigma_init) + (data[0, None, :]) / sigma_init), axis=1) #Make 0 instead of data[0...]???
 
-#         #Log likelihood of first point (just setting to 0, since we're not fitting sigma_init)
-#         ll2=np.array([0])
+        #Log likelihood of first point (just setting to 0, since we're not fitting sigma_init)
+        ll2=np.array([0])
 
-#         #Log likelihood of all data points (including first)
-#         ll=np.concatenate((ll1,ll2[:,np.newaxis]),axis=0)
-
-
-#         # print(ll.shape)
-#         return ll
-
-#         # return -0.5 * np.sum(
-#         #     (np.log(2 * np.pi * sigmas) + (data[1:, None, :] - data[:-1, None, :])**2 / sigmas)
-#         #     * mask[1:, None, :], axis=2)
+        #Log likelihood of all data points (including first)
+        # print(sigmas.shape)
+        # print(data.shape)
+        # print(ll1.shape)
+        # print(ll2.shape)
+        ll=np.concatenate((ll1,ll2[:,np.newaxis]),axis=0)
 
 
-#     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-#         D = self.D
-#         sigmas = np.exp(self.inv_sigmas) if with_noise else np.zeros((self.K, self.D))
-#         sigma_init = np.exp(self.inv_sigma_init) if with_noise else 0
 
-#         if xhist.shape[0] == 0:
-#             return np.sqrt(sigma_init[z]) * npr.randn(D)
-#         else:
-#             return xhist[-1] + np.sqrt(sigmas[z]) * npr.randn(D)
+        # print(ll.shape)
+        return ll
 
-#     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-#         x = np.concatenate(datas)
-#         weights = np.concatenate([Ez for Ez, _, _ in expectations])
-#         for k in range(self.K):
-#             # self.mus[k] = np.average(x, axis=0, weights=weights[:,k])
-#             sqerr = (x[1:] - x[:-1])**2
-#             d2=np.average(sqerr, weights=weights[1:,k], axis=0)
+        # return -0.5 * np.sum(
+        #     (np.log(2 * np.pi * sigmas) + (data[1:, None, :] - data[:-1, None, :])**2 / sigmas)
+        #     * mask[1:, None, :], axis=2)
+
+        # ll_init = stats.diagonal_gaussian_logpdf(data[0, None, :], 0, self.inv_sigma_init)
+        # ll_ar = stats.diagonal_gaussian_logpdf(data[1:, None, :], data[0:-1, :], self.inv_sigma)
+        # return np.row_stack((ll_init, ll_ar))
 
 
-#             self.inv_sigmas[k] = np.log(d2)
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        D = self.D
+        sigmas = np.exp(self.inv_sigmas) if with_noise else np.zeros((self.K, self.D))
+        sigma_init = np.exp(self.inv_sigma_init) if with_noise else 0
 
-#             #
-#             # print("is",self.inv_sigmas)
+        if xhist.shape[0] == 0:
+            return np.sqrt(sigma_init[z]) * npr.randn(D)
+        else:
+            return xhist[-1] + np.sqrt(sigmas[z]) * npr.randn(D)
 
-#     def smooth(self, expectations, data, input, tag):
-#         """
-#         Compute the mean observation under the posterior distribution
-#         of latent discrete states.
-#         """
-#         raise NotImplementedError
-#         # return expectations.dot(data)
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        x = np.concatenate(datas)
+        weights = np.concatenate([Ez for Ez, _, _ in expectations])
+        for k in range(self.K):
+            # self.mus[k] = np.average(x, axis=0, weights=weights[:,k])
+            sqerr = (x[1:] - x[:-1])**2
+            d2=np.average(sqerr, weights=weights[1:,k], axis=0)
+
+
+            self.inv_sigmas[k] = np.log(d2)
+
+            #
+            # print("is",self.inv_sigmas)
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        raise NotImplementedError
+        # return expectations.dot(data)
 
 
 
