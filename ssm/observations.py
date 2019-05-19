@@ -7,12 +7,12 @@ from autograd.scipy.misc import logsumexp
 from autograd.scipy.special import gammaln, digamma
 
 from ssm.util import random_rotation, ensure_args_are_lists, \
-    logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression
+    logistic, logit, one_hot, generalized_newton_studentst_dof, fit_linear_regression, \
+    relu
 from ssm.preprocessing import interpolate_data
 from ssm.cstats import robust_ar_statistics
 from ssm.optimizers import adam, bfgs, rmsprop, sgd
 import ssm.stats as stats
-
 
 class _Observations(object):
 
@@ -730,7 +730,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         elif isinstance(regularization_params, dict):
             # TODO: Validate the dictionary key/value pairs
             reg_type = regularization_params["type"]
-            if reg_type.lower() in ("l1","l2","l2_diff","group_lasso",'group_lasso_nodiag','con_group_lasso'):
+            if reg_type.lower() in ("l1","l1_diff","l2","l2_diff","group_lasso",'group_lasso_nodiag','con_group_lasso'):
                 prms = dict(lambda_A=0, lambda_V=0)
                 prms.update(regularization_params)
 
@@ -808,6 +808,10 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         reg_type = regularization_params["type"]
 
         if reg_type.lower() =='l1':
+            lambda_A = -regularization_params["lambda_A"]
+            return lambda_A * np.sum(np.abs(As))
+
+        if reg_type.lower() =='l1_diff':
             lambda_A = -regularization_params["lambda_A"]
             return lambda_A * np.sum(np.abs(As - np.identity(D)))
 
@@ -889,7 +893,7 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         K, D, M, lags = self.K, self.D, self.M, self.lags
 
         i_flag=0
-        if self.regularization_params["type"].lower() in ("l2_diff",):
+        if self.regularization_params["type"].lower() in ("l2_diff","l1_diff"):
             i_flag=1
 
         # Collect all the data
@@ -912,14 +916,24 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
         if not self.regularization_params["type"].lower() in ("l2","l2_diff"):
             warnings.warn("M-step only supports L2 regularization for now.")
 
-        if J0 is None and h0 is None:
+        if self.regularization_params["type"].lower() in ("l2","l2_diff"):
+            if J0 is None and h0 is None:
+                lambda_A = self.regularization_params["lambda_A"]
+                lambda_V = self.regularization_params["lambda_V"]
+                J_diag = np.concatenate((lambda_A * np.ones(D * lags),
+                                         lambda_V * np.ones(M),
+                                         1e-8 * np.ones(1)))
+                J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
+                h = np.zeros((K, D * lags + M + 1, D))
+        elif self.regularization_params["type"].lower() in ("l1","l1_diff"):
             lambda_A = self.regularization_params["lambda_A"]
             lambda_V = self.regularization_params["lambda_V"]
-            J_diag = np.concatenate((lambda_A * np.ones(D * lags),
-                                     lambda_V * np.ones(M),
-                                     1e-8 * np.ones(1)))
-            J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
-            h = np.zeros((K, D * lags + M + 1, D))
+            if J0 is None and h0 is None:
+                J_diag = np.concatenate((1e-8 * np.ones(D * lags),
+                                         1e-8 * np.ones(M),
+                                         1e-8 * np.ones(1)))
+                J = np.tile(np.diag(J_diag)[None, :, :], (K, 1, 1))
+                h = np.zeros((K, D * lags + M + 1, D))
         else:
             assert J0.shape == (K, D*lags + M + 1, D*lags + M + 1)
             assert h0.shape == (K, D*lags + M + 1, D)
@@ -938,9 +952,16 @@ class AutoRegressiveObservations(_AutoRegressiveObservationsBase):
 
         mus = np.linalg.solve(J, h)
 
-        self.As = np.swapaxes(mus[:, :D*lags, :], 1, 2)
-        if i_flag==1:
-            self.As=self.As+np.identity(D)
+        A_tmp = np.swapaxes(mus[:, :D*lags, :], 1, 2)
+
+
+        if self.regularization_params["type"].lower() in ("l1","l1_diff"):
+            A_tmp=np.sign(A_tmp)*relu(np.abs(A_tmp)-lambda_A)
+
+        if i_flag==0:
+            self.As=A_tmp
+        else:
+            self.As=A_tmp+np.identity(D)
 
         self.Vs = np.swapaxes(mus[:, D*lags:D*lags+M, :], 1, 2)
         self.bs = mus[:, -1, :]
